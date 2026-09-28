@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from io import BytesIO
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -31,6 +31,13 @@ class KeywordMatch(StrictModel):
     evidence: str
 
 
+class RequirementMapping(StrictModel):
+    requirement: str
+    priority: Literal["Must-have", "Preferred", "Unspecified"]
+    status: Literal["Evidence found", "Mention only", "Not found"]
+    resume_evidence: str
+
+
 class BulletFeedback(StrictModel):
     original: str
     observation: str
@@ -48,6 +55,7 @@ class ReviewReport(StrictModel):
     supported_skills: list[Evidence]
     gaps: list[Gap]
     keyword_matches: list[KeywordMatch]
+    requirement_mapping: list[RequirementMapping]
     experience_bullets: list[BulletFeedback]
     project_relevance: list[str]
     readability_issues: list[str]
@@ -130,14 +138,48 @@ def extract_job_keywords(job_description: str) -> list[str]:
     return [term for term in SKILL_TERMS if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", normalized)]
 
 
+def _requirement_priority(job_description: str, requirement: str) -> str:
+    for line in re.split(r"[\n.;]+", job_description):
+        if not re.search(rf"(?<!\w){re.escape(requirement)}(?!\w)", line, re.I):
+            continue
+        if re.search(r"\b(preferred|nice[- ]to[- ]have|bonus|desirable|a plus)\b", line, re.I):
+            return "Preferred"
+        if re.search(r"\b(required|must[- ]have|mandatory|must|required to|minimum)\b", line, re.I):
+            return "Must-have"
+    return "Unspecified"
+
+
 def _local_review(resume: str, job_description: str, target_role: str) -> ReviewReport:
     resume_lower = resume.casefold()
     keywords = extract_job_keywords(job_description)
     matches = [term for term in keywords if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", resume_lower)]
     missing = [term for term in keywords if term not in matches]
+    all_resume_lines = [line.strip(" •\t-") for line in resume.splitlines() if line.strip(" •\t-")]
     resume_lines = [line.strip(" •\t-") for line in resume.splitlines() if len(line.strip(" •\t-")) > 35]
     bullets = [line for line in resume_lines if re.search(r"\b(developed|built|led|created|analyzed|improved|managed|designed|implemented|increased|reduced)\b", line, re.I)]
     quantified = [line for line in bullets if re.search(r"\d+\s*%|\$\s?\d|\b\d+\s+(users|clients|customers|projects|hours|records)\b", line, re.I)]
+    requirement_mapping = []
+    for term in keywords:
+        term_pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
+        contextual_evidence = next(
+            (
+                line
+                for line in all_resume_lines
+                if re.search(term_pattern, line, re.I)
+                and len(line) > 35
+                and re.search(r"\b(used|applied|built|created|analyzed|improved|managed|designed|implemented|led|developed|worked with)\b", line, re.I)
+            ),
+            None,
+        )
+        mentioned_evidence = next((line for line in all_resume_lines if re.search(term_pattern, line, re.I)), None)
+        requirement_mapping.append(
+            RequirementMapping(
+                requirement=term,
+                priority=_requirement_priority(job_description, term),
+                status="Evidence found" if contextual_evidence else "Mention only" if mentioned_evidence else "Not found",
+                resume_evidence=contextual_evidence or mentioned_evidence or "No direct mention found in the extracted resume text.",
+            )
+        )
 
     supported = [
         Evidence(skill=term, evidence=next((line for line in resume_lines if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", line, re.I)), f"Listed in resume: {term}"))
@@ -184,6 +226,7 @@ def _local_review(resume: str, job_description: str, target_role: str) -> Review
         supported_skills=supported,
         gaps=gaps,
         keyword_matches=keyword_matches,
+        requirement_mapping=requirement_mapping,
         experience_bullets=feedback,
         project_relevance=["Local mode cannot reliably judge project relevance. Compare each project with the role's main responsibilities and surface the closest match first."],
         readability_issues=readability_issues,
@@ -217,7 +260,9 @@ def review_resume(
                 "role": "system",
                 "content": (
                     "You are an advisory resume reviewer. Compare the resume with the target role and return only the requested structured report. "
-                    "Use evidence from the resume, distinguish missing evidence from missing skill, and never invent qualifications or metrics. "
+                    "Map every important job requirement to direct resume evidence. Set priority to Must-have only when the job description explicitly requires it, Preferred when it marks it preferred/nice-to-have, otherwise Unspecified. "
+                    "Set status to Evidence found for contextual experience, Mention only for a bare skills-list mention, or Not found when absent. Quote concise evidence from the resume and do not infer equivalence without saying so. "
+                    "Distinguish missing evidence from missing skill, and never invent qualifications or metrics. "
                     "Rewrite suggestions must preserve the candidate's facts; use placeholders or ask for verified outcomes instead of fabricating them. "
                     "Do not claim to predict ATS scores, hiring outcomes, or interviews. Be concise and specific."
                 ),
@@ -249,6 +294,19 @@ def report_to_markdown(report: ReviewReport, target_role: str) -> str:
     sections.extend([f"- **{item.requirement} ({item.priority}):** {item.explanation}" for item in report.gaps] or ["- No gaps listed."])
     sections.extend(["", "## Keyword comparison"])
     sections.extend([f"- **{item.keyword}** - {item.status}: {item.evidence}" for item in report.keyword_matches] or ["- No recognized keywords."])
+    sections.extend(["", "## Requirement-to-evidence map", "| Requirement | Priority | Status | Resume evidence |", "| --- | --- | --- | --- |"])
+    if report.requirement_mapping:
+        sections.extend(
+            "| {} | {} | {} | {} |".format(
+                item.requirement.replace("|", "\\|"),
+                item.priority,
+                item.status,
+                item.resume_evidence.replace("|", "\\|").replace("\n", " "),
+            )
+            for item in report.requirement_mapping
+        )
+    else:
+        sections.append("No requirements could be mapped.")
     sections.extend(["", "## Experience bullets"])
     for item in report.experience_bullets:
         sections.extend([f"- Original: {item.original}", f"  - Observation: {item.observation}", f"  - Suggested rewrite: {item.suggested_rewrite}"])

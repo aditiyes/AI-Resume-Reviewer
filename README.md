@@ -16,7 +16,7 @@ OpenAI analysis is optional. Add `OPENAI_API_KEY` to the environment or enter a 
 
 ## Report contents
 
-Target-role alignment, skills supported by resume evidence, missing or weak requirements, keyword comparison, experience-bullet feedback, project relevance, readability notes, interview-preparation questions, and prioritized next edits. The report uses a Pydantic schema in both analysis modes and is advisory; it does not claim to calculate an ATS score or predict an interview or hiring outcome.
+Target-role alignment, skills supported by resume evidence, missing or weak requirements, a must-have/preferred requirement-to-evidence map, keyword comparison, experience-bullet feedback, project relevance, readability notes, interview-preparation questions, and prioritized next edits. The report uses a Pydantic schema in both analysis modes and is advisory; it does not claim to calculate an ATS score or predict an interview or hiring outcome.
 
 ## Verify
 

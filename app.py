@@ -35,6 +35,11 @@ st.markdown(
     .scope-index { color:var(--coral); font:500 .72rem 'DM Mono',monospace; }
     .scope-name { color:var(--ink); font:600 .92rem 'Manrope',sans-serif; }
     .scope-detail { display:block; color:var(--muted); font-size:.78rem; margin-top:1px; }
+    .mode-indicator { display:flex; align-items:baseline; flex-wrap:wrap; gap:.25rem .6rem; background:#fff; border-left:3px solid var(--coral); padding:.7rem .8rem; margin:.9rem 0 1rem; }
+    .mode-indicator.ai { border-left-color:var(--green); }
+    .mode-eyebrow { color:var(--muted); font:500 .68rem 'DM Mono',monospace; text-transform:uppercase; }
+    .mode-indicator strong { color:var(--ink); font:700 .85rem 'Manrope',sans-serif; }
+    .mode-description { flex-basis:100%; color:var(--muted); font-size:.78rem; }
     .stTabs [data-baseweb="tab-list"] { gap:1.2rem; border-bottom:1px solid var(--line); }
     .stTabs [data-baseweb="tab"] { color:var(--muted); }
     .stTabs [aria-selected="true"] { color:var(--green) !important; }
@@ -72,6 +77,15 @@ with left:
 with right:
     st.markdown("<div class='step-label'><span class='step-count'>03</span><span>Review scope</span></div>", unsafe_allow_html=True)
     st.markdown("### A closer read")
+    if api_key.strip():
+        mode_class = "ai"
+        mode_name = "AI-assisted review"
+        mode_description = "Structured analysis uses OpenAI; your resume text is sent to that service."
+    else:
+        mode_class = "local"
+        mode_name = "Local keyword review"
+        mode_description = "Uses built-in skill matching and structure checks; it does not perform semantic AI analysis."
+    st.markdown(f"<div class='mode-indicator {mode_class}'><span class='mode-eyebrow'>Current mode</span><strong>{mode_name}</strong><span class='mode-description'>{mode_description}</span></div>", unsafe_allow_html=True)
     st.markdown("<div class='scope-list'><div class='scope-row'><span class='scope-index'>01</span><span><span class='scope-name'>Evidence & alignment</span><span class='scope-detail'>Skills, role needs, and supporting proof</span></span></div><div class='scope-row'><span class='scope-index'>02</span><span><span class='scope-name'>Experience & projects</span><span class='scope-detail'>Bullet strength and relevant work</span></span></div><div class='scope-row'><span class='scope-index'>03</span><span><span class='scope-name'>Structure & preparation</span><span class='scope-detail'>Readability, next edits, and questions</span></span></div></div>", unsafe_allow_html=True)
     st.markdown("<div class='note'>Suggestions are advisory. Keep every edit accurate to your experience; the reviewer will not invent credentials, outcomes, or metrics.</div>", unsafe_allow_html=True)
     run_review = st.button("Review resume", type="primary", use_container_width=True)
@@ -108,6 +122,23 @@ if "review_report" in st.session_state:
             with st.expander(section, expanded=section in {"Summary", "Experience", "Skills"}):
                 st.text(content)
     with tabs[1]:
+        st.markdown("#### Requirement-to-evidence map")
+        if report.requirement_mapping:
+            st.dataframe(
+                [
+                    {
+                        "Requirement": item.requirement,
+                        "Priority": item.priority,
+                        "Match": item.status,
+                        "Resume evidence": item.resume_evidence,
+                    }
+                    for item in report.requirement_mapping
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+        else:
+            st.write("No recognized requirements were available to map.")
         a, b = st.columns(2, gap="large")
         with a:
             st.markdown("#### Supported skills")
